@@ -1,6 +1,6 @@
 # hand-recognition
 
-![](https://user-images.githubusercontent.com/56843532/146817725-d34a05c8-3331-4397-a112-eb5197fc0fe5.png =100x100)
+![](https://gyazo.com/eb5c5741b6a9a16c692170a41a49c858.png =250x250)
 
 Final project for CS6670: Computer Vision. A hand recognition tool for self-centered cameras. This tool builds upon Victor Dibia's handtracking tool (https://github.com/victordibia/handtracking), optimizing it for self-oriented camera view. This tool also uses ensembling with Google's MediaPipe Hand Detection. 
 
