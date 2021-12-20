@@ -18,9 +18,10 @@ mp_drawing_styles = mp.solutions.drawing_styles
 labels_true = np.loadtxt(open("labels_true.csv", "rb"),
                          delimiter=",", skiprows=0).astype(int)
 
-PATH = "./combine_neck_pilot.mp4"
-SCORE_THRESHOLD = 0.2
 LANDMARK_THRESHOLD = 10
+TOP_THRESHOLD = 0.35
+AREA_THRESHOLD = 0.2
+ENSEMBLE = True
 
 
 def calculate_statistics(pred_labels, true_labels):
@@ -52,7 +53,7 @@ def calculate_statistics(pred_labels, true_labels):
 
 def make_predictions(top_threshold=0.3, area_threshold=0.04, ensemble=False):
     detection_graph, sess = detector_utils.load_inference_graph()
-    cap = cv2.VideoCapture(PATH)
+    cap = cv2.VideoCapture(args.video_source)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 180)
 
@@ -66,7 +67,6 @@ def make_predictions(top_threshold=0.3, area_threshold=0.04, ensemble=False):
 
     frame_list = []
     while True:
-        num_frames += 1
         # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
         ret, image_np = cap.read()
         try:
@@ -113,57 +113,88 @@ def make_predictions(top_threshold=0.3, area_threshold=0.04, ensemble=False):
         scores = np.asarray(new_scores)
 
         frame_boxes = detector_utils.draw_box_on_image(
-            num_hands_detect, SCORE_THRESHOLD, scores, boxes, im_width, im_height, image_np)
-
-        elapsed_time = (datetime.datetime.now() - start_time).total_seconds()
+            num_hands_detect, args.score_thresh, scores, boxes, im_width, im_height, image_np)
 
         if len(frame_boxes) > 0:
             frame_list.append([num_frames, 1])
         else:
             frame_list.append([num_frames, 0])
 
+        # Calculate Frames per second (FPS)
+        num_frames += 1
+        elapsed_time = (datetime.datetime.now() - start_time).total_seconds()
+        fps = num_frames / elapsed_time
+
+        if (args.display > 0):
+            # Display FPS on frame
+            if (args.fps > 0):
+                detector_utils.draw_fps_on_image("FPS : " + str(int(fps)),
+                                                 image_np)
+
+            cv2.imshow('Single-Threaded Detection',
+                       cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR))
+
+            if cv2.waitKey(25) & 0xFF == ord('q'):
+                cv2.destroyAllWindows()
+                break
+        else:
+            print("frames processed: ", num_frames, "elapsed time: ",
+                  elapsed_time, "fps: ", str(int(fps)))
+
     print("Finished labeling %i frames!" % num_frames)
     print("Elapsed time:", elapsed_time)
     return np.asarray(frame_list)
 
 
-def load_predictions(top_threshold_list, area_threshold_list, ensemble=False):
-    best_prec = 0
-    best_prec_val = None
-    best_acc = 0
-    best_acc_val = None
-    best_rec = 0
-    best_rec_val = None
-    for top in top_threshold_list:
-        for area in area_threshold_list:
-            if ensemble:
-                path = "./results_ensemble/T%s_A%s.csv" % (top, area)
-            else:
-                path = "./results/T%s_A%s.csv" % (top, area)
-            labels_pred = np.loadtxt(
-                open(path, "rb"), delimiter=",", skiprows=0)
-            res = calculate_statistics(labels_pred, labels_true)
-            if res["accuracy"] > best_acc:
-                best_acc = res["accuracy"]
-                best_acc_val = "T=%s,A=%s" % (top, area)
-            if res["precision"] > best_prec:
-                best_prec = res["precision"]
-                best_prec_val = "T=%s,A=%s" % (top, area)
-            if res["recall"] > best_rec:
-                best_rec = res["recall"]
-                best_rec_val = "T=%s,A=%s" % (top, area)
-    print("Best accuracy:", best_acc, "Best accuracy values:", best_acc_val)
-    print("Best precision:", best_prec,
-          ". Best precision values:", best_prec_val)
-    print("Best recall:", best_rec, "Best recall values:", best_rec_val)
-    return
-
-
 if __name__ == '__main__':
-    top_threshold_list = ["0", "0.2", "0.25", "0.3", "0.35"]
-    area_threshold_list = ["0", "0.02", "0.04", "0.1", "0.2"]
-    # Change this if want to not use ensembling
-    ensemble = False
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-sth',
+        '--scorethreshold',
+        dest='score_thresh',
+        type=float,
+        default=0.2,
+        help='Score threshold for displaying bounding boxes')
+    parser.add_argument(
+        '-fps',
+        '--fps',
+        dest='fps',
+        type=int,
+        default=1,
+        help='Show FPS on detection/display visualization')
+    parser.add_argument(
+        '-src',
+        '--source',
+        dest='video_source',
+        default=0,
+        help='Device index of the camera.')
+    parser.add_argument(
+        '-wd',
+        '--width',
+        dest='width',
+        type=int,
+        default=320,
+        help='Width of the frames in the video stream.')
+    parser.add_argument(
+        '-ht',
+        '--height',
+        dest='height',
+        type=int,
+        default=180,
+        help='Height of the frames in the video stream.')
+    parser.add_argument(
+        '-ds',
+        '--display',
+        dest='display',
+        type=int,
+        default=1,
+        help='Display the detected images using OpenCV. This reduces FPS')
+    args = parser.parse_args()
+
+    cap = cv2.VideoCapture(args.video_source)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
     best_prec = 0
     best_prec_val = None
@@ -172,46 +203,19 @@ if __name__ == '__main__':
     best_rec = 0
     best_rec_val = None
 
-    results = []
-    for top_count in range(len(top_threshold_list)):
-        row = []
-        for area_count in range(len(area_threshold_list)):
-            top = top_threshold_list[top_count]
-            area = area_threshold_list[area_count]
-            print("Trying T=%s, A=%s" % (top, area))
-            labels_pred = make_predictions(float(top), float(area), ensemble)
-            if ensemble:
-                save_dir = "./results_ensemble"
-            else:
-                save_dir = "./results"
-            # Make a directory if it doesn't exist; save the predictions
-            Path(save_dir).mkdir(parents=True, exist_ok=True)
-            np.savetxt(save_dir+"/T%s_A%s.csv" % (top, area),
-                       labels_pred, fmt="%i", delimiter=",")
+    labels_pred = make_predictions(TOP_THRESHOLD, AREA_THRESHOLD, ENSEMBLE)
+    if ENSEMBLE:
+        save_dir = "./results_ensemble"
+    else:
+        save_dir = "./results"
 
-            res = calculate_statistics(labels_pred, labels_true)
-            row.append(res)
-            if res["accuracy"] > best_acc:
-                best_acc = res["accuracy"]
-                best_acc_val = "T=%s,A=%s" % (top, area)
-            if res["precision"] > best_prec:
-                best_prec = res["precision"]
-                best_prec_val = "T=%s,A=%s" % (top, area)
-            if res["recall"] > best_rec:
-                best_rec = res["recall"]
-                best_rec_val = "T=%s,A=%s" % (top, area)
-        results.append(row)
+    # Make a directory if it doesn't exist; save the predictions
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+    np.savetxt(save_dir+"/T%s_A%s.csv" % (TOP_THRESHOLD, AREA_THRESHOLD),
+               labels_pred, fmt="%i", delimiter=",")
+
+    res = calculate_statistics(labels_pred, labels_true)
 
     print("Best accuracy:", best_acc, best_acc_val)
     print("Best precision:", best_prec, best_prec_val)
     print("Best recall:", best_rec, best_rec_val)
-
-    # Save results
-    if ensemble:
-        res_path = './results_ensemble.csv'
-    else:
-        res_path = './results.csv'
-    with open('./results.csv', 'w') as fout:
-        json.dump(results, fout)
-
-    load_predictions(top_threshold_list, area_threshold_list, ensemble)
